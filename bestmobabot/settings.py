@@ -11,10 +11,9 @@ from pydantic import BaseModel, ValidationError, confloat, conint, validator
 from bestmobabot import constants
 
 
-class VKSettings(BaseModel):
+class WebSettings(BaseModel):
     email: str
     password: str
-    access_token: str  # VK.com API access token
 
 
 class TelegramSettings(BaseModel):
@@ -70,7 +69,7 @@ class BotSettings(BaseModel):
 
 # TODO: unit tests.
 class Settings(BaseModel):
-    vk: VKSettings
+    web: WebSettings
     bot: BotSettings
     telegram: Optional[TelegramSettings]
 

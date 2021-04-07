@@ -98,13 +98,12 @@ class InvalidSignatureError(APIError):
 
 
 class API:
-    VK_URL = 'https://vk.com/'
-    GAME_URL = 'https://vk.com/app5327745'
-    IFRAME_URL = 'https://i-heroes-vk.nextersglobal.com/iframe/vkontakte/iframe.new.php'
-    API_URL = 'https://heroes-vk.nextersglobal.com/api/'
+    GAME_URL = 'https://hero-wars.com/'
+    API_URL = 'https://heroes-wb.nextersglobal.com/api/'
 
     auth_token: str
     user_id: str
+    player_id: str
     request_id: int
     session_id: str
 
@@ -119,7 +118,7 @@ class API:
     def prepare(self, invalidate_session: bool = False):
         if not invalidate_session:
             try:
-                state: Dict[str, Any] = self.db[f'api:{self.settings.vk.email}:state']
+                state: Dict[str, Any] = self.db[f'api:{self.settings.web.email}:state']
             except KeyError:
                 logger.info('Previously saved state is missing.')
             else:
@@ -128,69 +127,59 @@ class API:
                 self.auth_token = state['auth_token']
                 self.session_id = state['session_id']
                 try:
-                    self.request_id = self.db[f'api:{self.settings.vk.email}:request_id']
+                    self.request_id = self.db[f'api:{self.settings.web.email}:request_id']
                 except KeyError:
                     self.request_id = 0
                 return
 
-        self.authenticate_vk()
+        #self.authenticate_hw_web()
 
-        logger.debug('Loading game page on VK.com…')
-        with self.session.get(API.GAME_URL, timeout=constants.API_TIMEOUT) as response:
+        logger.debug('Logging into Hero-Wars.com…')
+        with self.session.get(self.GAME_URL, timeout=constants.API_TIMEOUT) as response:
+            response.raise_for_status()
+
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        with self.session.post(self.GAME_URL+'login', headers=headers, data='{"email":"hriditr@pm.me","password":"Hw#896745","remember":1}', timeout=constants.API_TIMEOUT) as response:
             logger.info('Status: {} {}.', response.status_code, response.url)
             response.raise_for_status()
+
+        with self.session.get(self.GAME_URL, timeout=constants.API_TIMEOUT) as response:
+            response.raise_for_status()
+            print(response.text)
             app_page = response.text
 
+
+
         # Look for params variable in the script.
-        match = re.search(r'var params\s?=\s?({[^\}]+\})', app_page)
-        assert match, 'params not found, perhaps invalid remixsid?'
-        params = json.loads(match.group(1))
-        logger.trace('params: {}', params)
+        match = re.search(r'window.NXFlashVars\s?=\s?({[^\}]+\})', app_page)
+        assert match, 'NXFlashVars not found'
+        flashvars=match.groups(1)
 
-        # Load the proxy page and look for Hero Wars authentication token.
-        logger.debug('Authenticating in Hero Wars…')
-        with self.session.get(API.IFRAME_URL, params=params, timeout=constants.API_TIMEOUT) as response:
-            logger.info('Status: {} {}.', response.status_code, response.url)
-            response.raise_for_status()
-            iframe_new = response.text
-        match = re.search(r'auth_key=([a-zA-Z0-9.\-]+)', iframe_new)
-        assert match, f'authentication key is not found: {iframe_new}'
-        self.auth_token = match.group(1)
-
+        self.auth_token = self.get_var('auth_key', flashvars[0])
         logger.debug('Authentication token: {}', self.auth_token)
-        self.user_id = str(params['viewer_id'])
+        self.user_id = str(self.get_var('uid', flashvars[0]))
         self.session_id = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(14))
         self.request_id = 0
 
-        self.db[f'api:{self.settings.vk.email}:state'] = {
+        self.db[f'api:{self.settings.web.email}:state'] = {
             'user_id': self.user_id,
             'auth_token': self.auth_token,
             'session_id': self.session_id,
         }
 
-    def authenticate_vk(self):
-        logger.debug('Logging into VK.com…')
-        with self.session.get(self.VK_URL, timeout=constants.API_TIMEOUT) as response:
-            response.raise_for_status()
-            if response.url.endswith('feed'):
-                logger.debug('Already logged in.')
-                return
-            soup = BeautifulSoup(response.text, features='html.parser')
-
-        form: Tag = soup.find('form')
-        data = {field.get('name'): field.get('value') for field in form.find_all('input')}
-        data['email'] = self.settings.vk.email
-        data['pass'] = self.settings.vk.password
-        with self.session.post(form['action'], data=data, timeout=constants.API_TIMEOUT) as response:
-            logger.info('Status: {} {}.', response.status_code, response.url)
-            response.raise_for_status()
+    def get_var(self, key, string):
+        key = re.search(rf"{key}\s*:\s*'?([a-zA-Z0-9-+/.]+)'?,", string)
+        assert key, f"variable not found for key: {key}"
+        return key.group(1)
 
     def call(
-        self,
-        name: str,
-        arguments: Optional[Dict[str, Any]] = None,
-        random_sleep=True,
-        log_result=False,
+            self,
+            name: str,
+            arguments: Optional[Dict[str, Any]] = None,
+            random_sleep=True,
+            log_result=False,
     ) -> Result:
         # TODO: perhaps, accept a return response type and return a typed response.
         try:
@@ -203,24 +192,24 @@ class API:
 
     def _call(self, name: str, *, arguments: Optional[Dict[str, Any]], random_sleep, log_result) -> Result:
         self.request_id += 1
-        self.db[f'api:{self.settings.vk.email}:request_id'] = self.request_id
+        self.db[f'api:{self.settings.web.email}:request_id'] = self.request_id
 
         # Emulate human behavior a little.
         sleep_time = random.uniform(5.0, 10.0) if random_sleep and self.request_id != 1 else 0.0
-        logger.info(f'#{self.request_id}: {name}({arguments or {}}) in {sleep_time:.1f} seconds…')
+        logger.info(f'#{self.request_id}: {name}({arguments or {} }) in {sleep_time:.1f} seconds…')
         sleep(sleep_time)
 
         calls = [{'ident': name, 'name': name, 'args': arguments or {}}]
         data = json.dumps({"session": None, "calls": calls})
         headers = {
-            'X-Auth-Application-Id': '5327745',
-            'X-Auth-Network-Ident': 'vkontakte',
+            'X-Auth-Application-Id': '3',
+            'X-Auth-Network-Ident': 'web',
+            'X-Auth-Player-Id': self.player_id,
             'X-Auth-Session-Id': self.session_id,
             'X-Auth-Session-Key': '',
             'X-Auth-Token': self.auth_token,
             'X-Auth-User-Id': self.user_id,
             'X-Env-Library-Version': '1',
-            'X-Env-Referrer': 'unknown',
             'X-Request-Id': str(self.request_id),
             'X-Requested-With': 'XMLHttpRequest',
             'X-Server-Time': f'{time():.3f}',
@@ -308,8 +297,8 @@ class API:
     # Daily bonus.
     # ------------------------------------------------------------------------------------------------------------------
 
-    def farm_daily_bonus(self) -> Reward:
-        return Reward.parse_obj(self.call('dailyBonusFarm', {'vip': 0}).response)
+    def farm_daily_bonus(self, vip) -> Reward:
+        return Reward.parse_obj(self.call('dailyBonusFarm', {'vip': vip}).response)
 
     # Expeditions.
     # ------------------------------------------------------------------------------------------------------------------
@@ -353,8 +342,12 @@ class API:
     # Daily gift.
     # ------------------------------------------------------------------------------------------------------------------
 
-    def send_daily_gift(self, user_ids: Iterable[str]) -> Quests:
-        return self.call('friendsSendDailyGift', {'ids': list(user_ids), 'notifiedUserIds': []}).quests
+    def send_daily_gift(self) -> Quests:
+        return self.call('clanSendDailyGifts').quests
+
+    def get_clan_available_gifts(self):
+        result = self.call('clanGetAvailableDailyGifts')
+        return result.response['giftUids']
 
     # Arena.
     # ------------------------------------------------------------------------------------------------------------------
@@ -392,6 +385,9 @@ class API:
 
     def farm_zeppelin_gift(self) -> Reward:
         return Reward.parse_obj(self.call('zeppelinGiftFarm').response)
+
+    def farm_zeppelin_subscription(self) -> Reward:
+        return Reward.parse_obj(self.call('subscriptionFarm').response)
 
     # Artifact chests.
     # ------------------------------------------------------------------------------------------------------------------
@@ -466,6 +462,15 @@ class API:
     def next_tower_chest(self) -> Tower:
         return Tower.parse_obj(self.call('towerNextChest').response)
 
+    def tower_getSkullReward(self) -> Reward:
+        result = self.call('tower_getSkullReward', log_result=True)
+        return Reward.parse_obj(self.call('tower_farmSkullReward', log_result=True).response)
+
+    def tower_farmPointRewards(self) -> Reward:
+        return Reward.parse_obj(
+            self.call('tower_farmPointRewards', {"points":[200,3000,10000,15000,20000,25000,35000,45000,60000]}, log_result=True).response
+        )
+
     # Offers.
     # ------------------------------------------------------------------------------------------------------------------
 
@@ -482,20 +487,43 @@ class API:
         result = self.call('titanArtifactChestOpen', {'amount': amount, 'free': free})
         return list_of(Reward, result.response['reward']), result.quests
 
+    # Hero Upgrade
+    # ------------------------------------------------------------------------------------------------------------------
+    def upgrade_hero_skill(
+            self,
+            hero_id: str,
+            skill: str,
+    ) -> Result:
+        return self.call('heroUpgradeSkill', {
+            'heroId': hero_id,
+            'skill': skill
+        }, log_result=True)
+
+    def upgrade_hero_skin(
+            self,
+            hero_id: str,
+            skinId: str,
+    ) -> Result:
+        return self.call('heroSkinUpgrade', {
+            'heroId': hero_id,
+            'skinId': skinId
+        }, log_result=True)
+
+
     # Runes.
     # ------------------------------------------------------------------------------------------------------------------
 
     def enchant_hero_rune(
-        self,
-        hero_id: str,
-        tier: str,
-        consumables: Optional[Dict[str, int]] = None,
+            self,
+            hero_id: str,
+            tier: str,
+            consumables: Optional[Dict[str, int]] = None,
     ) -> Result:
         return self.call('heroEnchantRune', {
             'heroId': hero_id,
             'tier': tier,
             'items': {'consumable': consumables or {'1': 1}}},
-        )
+                         )
 
     # Hero titan gifts
     # ------------------------------------------------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from time import sleep
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from bestmobabot import constants
-from bestmobabot.api import API, AlreadyError, NotEnoughError, NotFoundError
+from bestmobabot.api import API, AlreadyError, NotEnoughError, NotFoundError, NotAvailableError
 from bestmobabot.arena import ArenaSolution, ArenaSolver, reduce_grand_arena, reduce_normal_arena
 from bestmobabot.database import Database
 from bestmobabot.dataclasses_ import ArenaResult, Hero, Mission, Quest, Quests, Replay, User
@@ -21,14 +21,12 @@ from bestmobabot.scheduler import Scheduler, Task, now
 from bestmobabot.settings import Settings
 from bestmobabot.telegram import Telegram, TelegramLogger
 from bestmobabot.trainer import Trainer
-from bestmobabot.vk import VK
 
 
 class Bot:
-    def __init__(self, db: Database, api: API, vk: VK, telegram: Optional[Telegram], settings: Settings):
+    def __init__(self, db: Database, api: API, telegram: Optional[Telegram], settings: Settings):
         self.db = db
         self.api = api
-        self.vk = vk
         self.logger = TelegramLogger(telegram)
         self.settings = settings
 
@@ -63,12 +61,6 @@ class Bot:
                 time(hour=12, minute=0, tzinfo=self.user.tz),
                 time(hour=18, minute=0, tzinfo=self.user.tz),
             ], execute=self.farm_mail),
-            Task(at=[
-                time(hour=0, minute=0, tzinfo=self.user.tz),
-                time(hour=6, minute=0, tzinfo=self.user.tz),
-                time(hour=12, minute=0, tzinfo=self.user.tz),
-                time(hour=18, minute=0, tzinfo=self.user.tz),
-            ], execute=self.check_freebie),
             Task(at=[
                 time(hour=0, minute=0, tzinfo=self.user.tz),
                 time(hour=8, minute=0, tzinfo=self.user.tz),
@@ -179,7 +171,7 @@ class Bot:
         """
         Заново заходит в игру, это нужно для появления ежедневных задач в событиях.
         """
-        self.log(f'🎫 *{self.user.name}* заново заходит в игру…')
+        #self.log(f'🎫 *{self.user.name}* заново заходит в игру…')
         self.api.prepare(invalidate_session=True)
         self.api.register()
         self.user = self.api.get_user_info()
@@ -192,7 +184,12 @@ class Bot:
         self.log(f'*{self.user.name}* забирает ежедневный подарок…')
         with self.logger:
             self.logger.append(f'🎁 *{self.user.name}* получил в ежедневном подарке:', '')
-            self.api.farm_daily_bonus().log(self.logger)
+            try:
+                self.api.farm_daily_bonus(1).log(self.logger)
+            except NotAvailableError as e:
+                logger.info(f'Not available: {e}.')
+                self.api.farm_daily_bonus(0).log(self.logger)
+
 
     def farm_expeditions(self) -> Optional[datetime]:
         """
@@ -310,10 +307,8 @@ class Bot:
         Отправляет сердечки друзьям.
         """
         self.log(f'❤️ *{self.user.name}* дарит сердечки друзьям…')
-        if self.settings.bot.friend_ids:
-            self.farm_quests(self.api.send_daily_gift(self.settings.bot.friend_ids))
-        else:
-            logger.warning('No friends specified.')
+        self.api.get_clan_available_gifts()
+        self.farm_quests(self.api.send_daily_gift())
         self.log(f'❤️ *{self.user.name}* подарил сердечки друзьям.')
 
     def train_arena_model(self):
@@ -483,6 +478,7 @@ class Bot:
         """
         self.log(f'🔑 *{self.user.name}* открывает артефактные сундуки…')
 
+        self.api.farm_zeppelin_subscription().log()
         self.api.farm_zeppelin_gift().log()
         for _ in range(constants.MAX_OPEN_ARTIFACT_CHESTS):
             try:

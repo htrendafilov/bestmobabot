@@ -46,16 +46,16 @@ def main(settings: Settings, verbosity: int, shell: bool):
 
         telegram = Telegram(session, settings.telegram) if settings.telegram else None
         api = API(session, db, settings)
-        bot = Bot(db, api, VK(session, settings), telegram, settings)
+        bot = Bot(db, api, telegram, settings)
 
         bot.log('🎉 Бот запускается…')
-        api.prepare()
-        bot.prepare()
+        # api.prepare()
+        # bot.prepare()
 
-        logger.info('Welcome «{}»!', bot.user.name)
-        logger.info('Game time: {:%H:%M:%S %Z}', datetime.now(bot.user.tz))
-        logger.info('Next day: {:%H:%M:%S %Z}.', bot.user.next_day.astimezone(bot.user.tz))
-        bot.log(f'🎉 *{bot.user.name}* запустился!')
+        # logger.info('Welcome «{}»!', bot.user.name)
+        # logger.info('Game time: {:%H:%M:%S %Z}', datetime.now(bot.user.tz))
+        # logger.info('Next day: {:%H:%M:%S %Z}.', bot.user.next_day.astimezone(bot.user.tz))
+        # bot.log(f'🎉 *{bot.user.name}* запустился!')
 
         if not shell:
             bot.run()

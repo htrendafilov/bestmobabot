@@ -16,7 +16,7 @@ from bestmobabot import dataclasses_
 
 @lru_cache(maxsize=None)
 def get_translations() -> Dict[str, str]:
-    return json.loads(decompress(resource_string('bestmobabot.js', 'ru.json.gz')).decode())
+    return json.loads(decompress(resource_string('bestmobabot.js', 'en.json.gz')).decode())
 
 
 @lru_cache(maxsize=None)

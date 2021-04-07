@@ -20,7 +20,7 @@ class VK:
     def __init__(self, session: Session, settings: Settings):
         self.session = session
         self.params = {
-            'access_token': settings.vk.access_token,
+            #'access_token': settings.web.access_token,
             'owner_id': '-116039030',
             'count': '5',
             'v': '5.92',
